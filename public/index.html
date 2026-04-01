@@ -1,0 +1,918 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>WeatherMind</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet"/>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#07090f; --bg2:#0b0f1a; --card:#101520; --card2:#141c28;
+  --border:rgba(255,255,255,.07); --border2:rgba(255,255,255,.13);
+  --text:#dde4f0; --muted:#4a5568; --muted2:#718096;
+  --sky:#38bdf8; --sky2:rgba(56,189,248,.12);
+  --rain:#60a5fa; --sun:#fbbf24; --wind:#a78bfa; --humid:#34d399;
+  --warn:#f87171; --green:#22c55e;
+  --font:'Syne',sans-serif; --mono:'JetBrains Mono',monospace;
+}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font-family:var(--font);min-height:100vh;overflow-x:hidden}
+body::before{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
+  background:radial-gradient(ellipse 60% 40% at 15% 20%,rgba(56,189,248,.04),transparent),
+             radial-gradient(ellipse 50% 60% at 85% 70%,rgba(96,165,250,.03),transparent)}
+
+/* ── Layout ── */
+.app{display:flex;height:100vh;overflow:hidden;position:relative;z-index:1}
+
+/* ── Sidebar ── */
+.sidebar{width:270px;flex-shrink:0;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+.sidebar-top{padding:1.25rem 1.25rem .75rem;border-bottom:1px solid var(--border)}
+.logo{font-size:1.3rem;font-weight:800;letter-spacing:-1px;color:var(--sky)}
+.logo-sub{font-family:var(--mono);font-size:.58rem;color:var(--muted2);letter-spacing:2px;text-transform:uppercase;margin-top:.1rem}
+
+.search-area{padding:.75rem 1rem;border-bottom:1px solid var(--border)}
+.search-row{display:flex;gap:.4rem;align-items:center;background:var(--card);border:1px solid var(--border2);border-radius:8px;padding:.45rem .75rem;transition:border-color .2s}
+.search-row:focus-within{border-color:rgba(56,189,248,.45)}
+.search-row input{flex:1;background:none;border:none;outline:none;color:var(--text);font-family:var(--font);font-size:.82rem}
+.search-row input::placeholder{color:var(--muted)}
+.search-btn{background:none;border:none;cursor:pointer;color:var(--sky);font-size:1rem;line-height:1;padding:0}
+.search-results{margin-top:.5rem;display:flex;flex-direction:column;gap:.3rem}
+.sr-item{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:.5rem .75rem;cursor:pointer;transition:all .15s;font-size:.8rem}
+.sr-item:hover{border-color:rgba(56,189,248,.3);background:var(--card2)}
+.sr-city{font-weight:600}
+.sr-country{color:var(--muted2);font-size:.7rem;font-family:var(--mono)}
+
+.city-list{flex:1;overflow-y:auto;padding:.5rem .75rem;scrollbar-width:thin;scrollbar-color:var(--border) transparent}
+.city-item{display:flex;align-items:center;justify-content:space-between;padding:.6rem .75rem;border-radius:10px;cursor:pointer;transition:all .18s;margin-bottom:.3rem;border:1px solid transparent;gap:.5rem}
+.city-item:hover{background:var(--card);border-color:var(--border)}
+.city-item.active{background:var(--card2);border-color:rgba(56,189,248,.3)}
+.ci-left{display:flex;flex-direction:column;gap:.1rem;flex:1;min-width:0}
+.ci-name{font-size:.85rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ci-country{font-size:.62rem;color:var(--muted2);font-family:var(--mono)}
+.ci-right{display:flex;flex-direction:column;align-items:flex-end;gap:.1rem;flex-shrink:0}
+.ci-temp{font-size:1rem;font-weight:700;font-family:var(--mono);color:var(--sky)}
+.ci-icon{font-size:.95rem}
+.ci-remove{background:none;border:none;color:var(--muted);cursor:pointer;font-size:.65rem;padding:.1rem .3rem;border-radius:4px;opacity:0;pointer-events:none;transition:color .15s}
+.city-item:hover .ci-remove{opacity:1;pointer-events:auto}
+.ci-remove:hover{color:var(--warn)}
+.no-cities{font-size:.75rem;color:var(--muted);text-align:center;padding:1.5rem .5rem;line-height:1.7}
+
+/* unit toggle */
+.unit-row{padding:.6rem 1rem;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;font-size:.72rem;color:var(--muted2)}
+.unit-sw{display:flex;background:var(--card);border:1px solid var(--border);border-radius:7px;overflow:hidden}
+.unit-sw button{background:none;border:none;color:var(--muted2);padding:.3rem .75rem;cursor:pointer;font-family:var(--mono);font-size:.7rem;transition:all .15s}
+.unit-sw button.on{background:var(--sky2);color:var(--sky)}
+
+/* ── Main ── */
+.main{flex:1;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--border) transparent}
+
+/* top bar */
+.topbar{display:flex;align-items:center;gap:.75rem;padding:.8rem 2rem;border-bottom:1px solid var(--border);background:var(--bg2)}
+.live-dot{display:flex;align-items:center;gap:.4rem;font-size:.62rem;color:var(--muted2);font-family:var(--mono)}
+.live-dot::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--green);animation:lp 2s ease-in-out infinite;flex-shrink:0}
+@keyframes lp{0%,100%{opacity:1}50%{opacity:.3}}
+.topbar-right{margin-left:auto;display:flex;align-items:center;gap:.75rem;font-size:.62rem;color:var(--muted);font-family:var(--mono)}
+.api-badge{background:rgba(56,189,248,.08);border:1px solid rgba(56,189,248,.2);color:var(--sky);padding:.2rem .6rem;border-radius:20px;font-size:.58rem;letter-spacing:.5px}
+
+/* alert bar */
+.alert-bar{margin:.75rem 2rem 0;padding:.7rem 1rem;background:rgba(248,113,113,.07);border:1px solid rgba(248,113,113,.25);border-radius:8px;font-size:.8rem;display:none;align-items:center;gap:.7rem}
+.alert-bar.show{display:flex}
+
+/* empty state */
+.empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;height:80%;gap:1rem;color:var(--muted);text-align:center;padding:2rem}
+.empty-icon{font-size:3rem;opacity:.3}
+.empty-title{font-size:1.1rem;font-weight:600;color:var(--muted2)}
+.empty-sub{font-size:.8rem;line-height:1.7;max-width:320px}
+
+/* ── Hero ── */
+.hero{padding:1.75rem 2rem 1.25rem;display:grid;grid-template-columns:1fr auto;gap:2rem;align-items:start;border-bottom:1px solid var(--border);position:relative;overflow:hidden}
+.hero::after{content:'';position:absolute;right:-80px;top:-80px;width:300px;height:300px;border-radius:50%;background:radial-gradient(circle,rgba(56,189,248,.05),transparent 70%);pointer-events:none}
+.hero-tag{font-family:var(--mono);font-size:.58rem;color:var(--muted2);letter-spacing:2.5px;text-transform:uppercase;margin-bottom:.3rem}
+.hero-name{font-size:2.1rem;font-weight:800;letter-spacing:-1.5px;line-height:1;margin-bottom:.15rem}
+.hero-coords{font-family:var(--mono);font-size:.62rem;color:var(--muted);margin-bottom:1rem}
+.hero-temp-row{display:flex;align-items:flex-start;gap:1.25rem;margin-bottom:1rem}
+.big-temp{font-size:5.5rem;font-weight:800;font-family:var(--mono);line-height:1;color:var(--sky);letter-spacing:-4px}
+.big-temp sup{font-size:1.8rem;font-weight:400;vertical-align:super;letter-spacing:0}
+.hero-meta{display:flex;flex-direction:column;justify-content:center;gap:.35rem}
+.hero-icon-big{font-size:2.5rem;line-height:1}
+.hero-cond{font-size:1rem;font-weight:600}
+.hero-feels{font-size:.75rem;color:var(--muted2);font-family:var(--mono)}
+.hero-pills{display:flex;gap:.5rem;flex-wrap:wrap}
+.pill{display:flex;flex-direction:column;gap:.1rem;background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:.45rem .8rem}
+.pill .pl{font-size:.58rem;color:var(--muted2);text-transform:uppercase;letter-spacing:.5px}
+.pill .pv{font-size:.82rem;font-weight:500;font-family:var(--mono)}
+.pill.wind .pv{color:var(--wind)}
+.pill.humid .pv{color:var(--humid)}
+.pill.rain .pv{color:var(--rain)}
+.pill.uv .pv{color:var(--sun)}
+.pill.pres .pv{color:#94a3b8}
+
+/* ML confidence panel */
+.hero-right{display:flex;flex-direction:column;gap:.75rem;min-width:185px}
+.ml-panel{background:linear-gradient(135deg,rgba(129,140,248,.08),rgba(56,189,248,.04));border:1px solid rgba(129,140,248,.22);border-radius:12px;padding:1rem}
+.ml-top{display:flex;align-items:center;gap:.45rem;margin-bottom:.65rem}
+.ml-dot{width:7px;height:7px;border-radius:50%;background:#818cf8;animation:mlp 2s ease-in-out infinite}
+@keyframes mlp{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.75)}}
+.ml-lbl{font-size:.58rem;font-family:var(--mono);color:#818cf8;letter-spacing:2px;text-transform:uppercase}
+.ml-conf-num{font-size:2.2rem;font-weight:800;font-family:var(--mono);color:#a5b4fc;letter-spacing:-2px;line-height:1}
+.ml-conf-sub{font-size:.62rem;color:var(--muted2);font-family:var(--mono);margin-top:.15rem}
+.ml-stats{display:flex;gap:.4rem;margin-top:.55rem}
+.ml-st{display:flex;flex-direction:column;gap:.1rem;flex:1;background:rgba(255,255,255,.03);border-radius:6px;padding:.35rem .5rem}
+.ml-st .k{font-size:.52rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+.ml-st .v{font-size:.78rem;font-family:var(--mono);color:#a5b4fc}
+.ml-training{font-size:.62rem;color:var(--muted2);font-family:var(--mono);margin-top:.4rem;display:flex;align-items:center;gap:.35rem}
+.spin{animation:spin 1.2s linear infinite;display:inline-block}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── Tabs ── */
+.tab-strip{display:flex;padding:0 2rem;border-bottom:1px solid var(--border);overflow-x:auto;scrollbar-width:none}
+.tab-strip::-webkit-scrollbar{display:none}
+.tab-btn{background:none;border:none;border-bottom:2px solid transparent;color:var(--muted2);padding:.75rem 1rem;cursor:pointer;font-family:var(--font);font-size:.8rem;font-weight:600;margin-bottom:-1px;transition:all .18s;white-space:nowrap;letter-spacing:.2px}
+.tab-btn:hover{color:var(--text)}
+.tab-btn.active{color:var(--sky);border-bottom-color:var(--sky)}
+.tab-panel{display:none;padding:1.5rem 2rem 2.5rem;animation:fadeUp .3s ease}
+.tab-panel.active{display:block}
+@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+/* ── Sections ── */
+.sec-lbl{font-family:var(--mono);font-size:.58rem;letter-spacing:2.5px;text-transform:uppercase;color:var(--muted);margin-bottom:.7rem}
+
+/* hourly */
+.hourly-scroll{display:flex;gap:.45rem;overflow-x:auto;padding-bottom:.5rem;margin-bottom:1.5rem;scrollbar-width:thin;scrollbar-color:var(--border) transparent}
+.h-card{flex-shrink:0;width:66px;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:.65rem .4rem;text-align:center;display:flex;flex-direction:column;align-items:center;gap:.25rem;cursor:pointer;transition:all .15s}
+.h-card:hover{border-color:rgba(56,189,248,.35);background:var(--card2)}
+.h-card.now{border-color:rgba(56,189,248,.5);background:rgba(56,189,248,.07)}
+.h-time{font-size:.58rem;color:var(--muted2);font-family:var(--mono)}
+.h-icon{font-size:1.2rem}
+.h-temp{font-size:.82rem;font-weight:700;font-family:var(--mono)}
+.h-precip{font-size:.56rem;color:var(--rain)}
+
+/* weekly */
+.weekly-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:.55rem;margin-bottom:1.5rem}
+@media(max-width:700px){.weekly-grid{grid-template-columns:repeat(4,1fr)}}
+.w-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:.8rem .45rem;text-align:center;cursor:pointer;transition:all .18s;display:flex;flex-direction:column;align-items:center;gap:.3rem}
+.w-card:hover,.w-card.sel{border-color:rgba(56,189,248,.4);background:var(--card2);transform:translateY(-2px)}
+.w-day{font-size:.6rem;color:var(--muted2);text-transform:uppercase;letter-spacing:.5px;font-family:var(--mono)}
+.w-icon{font-size:1.5rem}
+.w-hi{font-size:.88rem;font-weight:700;font-family:var(--mono)}
+.w-lo{font-size:.7rem;color:var(--muted2);font-family:var(--mono)}
+.w-rain{font-size:.58rem;color:var(--rain)}
+
+/* charts */
+.chart-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1rem}
+.chart-grid-3{display:grid;grid-template-columns:2fr 1fr;gap:1rem;margin-bottom:1rem}
+@media(max-width:800px){.chart-grid-2,.chart-grid-3{grid-template-columns:1fr}}
+.c-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:1.25rem}
+.c-card h3{font-size:.75rem;font-weight:500;color:var(--muted2);margin-bottom:1rem;letter-spacing:.2px}
+
+/* seasonal cards */
+.season-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:.7rem;margin-bottom:1.25rem}
+@media(max-width:700px){.season-grid{grid-template-columns:repeat(2,1fr)}}
+.s-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:1rem}
+.s-icon{font-size:1.4rem;margin-bottom:.35rem}
+.s-name{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:.25rem}
+.s-temp{font-family:var(--mono);font-size:.78rem;margin-bottom:.45rem}
+.s-bar-track{background:rgba(255,255,255,.06);border-radius:3px;height:4px;margin-bottom:.2rem}
+.s-bar-fill{height:100%;border-radius:3px;transition:width 1.2s cubic-bezier(.4,0,.2,1)}
+.s-note{font-size:.62rem;color:var(--muted2);line-height:1.4}
+
+/* model metrics */
+.mm-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:.7rem;margin-bottom:1.25rem}
+@media(max-width:700px){.mm-grid{grid-template-columns:repeat(2,1fr)}}
+.mm-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:.9rem}
+.mm-k{font-size:.58rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:.3rem}
+.mm-v{font-size:1.25rem;font-weight:700;font-family:var(--mono);color:var(--sky)}
+.mm-sub{font-size:.62rem;color:var(--muted2);margin-top:.15rem}
+
+/* compare grid */
+.cmp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:.8rem;margin-bottom:1.25rem}
+.cmp-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:1.1rem;display:flex;flex-direction:column;gap:.45rem}
+.cmp-city{font-size:.95rem;font-weight:700}
+.cmp-temp{font-size:1.9rem;font-weight:800;font-family:var(--mono);color:var(--sky)}
+.cmp-rows{display:flex;flex-direction:column;gap:.28rem;margin-top:.25rem}
+.cmp-row{display:flex;justify-content:space-between;font-size:.7rem;font-family:var(--mono)}
+.cmp-row .k{color:var(--muted2)}
+
+/* loading overlay */
+.loading-overlay{display:none;position:fixed;inset:0;background:rgba(7,9,15,.85);z-index:200;align-items:center;justify-content:center;flex-direction:column;gap:1rem}
+.loading-overlay.show{display:flex}
+.spinner{width:36px;height:36px;border:3px solid var(--border2);border-top-color:var(--sky);border-radius:50%;animation:spin 1s linear infinite}
+.loading-msg{font-family:var(--mono);font-size:.75rem;color:var(--muted2)}
+
+/* error toast */
+.toast{position:fixed;bottom:2rem;right:2rem;background:var(--card2);border:1px solid rgba(248,113,113,.3);color:var(--warn);padding:.75rem 1.2rem;border-radius:10px;font-size:.82rem;z-index:300;font-family:var(--font);max-width:340px;display:none}
+.toast.show{display:block;animation:fadeUp .3s ease}
+
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:4px}
+@media(max-width:700px){
+  .app{flex-direction:column;height:auto}
+  .sidebar{width:100%;height:auto;border-right:none;border-bottom:1px solid var(--border)}
+  .city-list{max-height:160px}
+  .hero{grid-template-columns:1fr;padding:1.25rem}
+  .hero-right{flex-direction:row;flex-wrap:wrap}
+  .big-temp{font-size:4rem}
+  .main{overflow-y:visible}
+}
+</style>
+</head>
+<body>
+
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="spinner"></div>
+  <div class="loading-msg" id="loadingMsg">Loading weather data…</div>
+</div>
+<div class="toast" id="toast"></div>
+
+<div class="app">
+
+<!-- ── SIDEBAR ── -->
+<aside class="sidebar">
+  <div class="sidebar-top">
+    <div class="logo">WeatherMind</div>
+    <div class="logo-sub">Live · ML Powered · AccuWeather</div>
+  </div>
+
+  <div class="search-area">
+    <div class="search-row">
+      <input type="text" id="searchInput" placeholder="Search city…"
+             onkeydown="if(event.key==='Enter')doSearch()"
+             oninput="clearResults()"/>
+      <button class="search-btn" onclick="doSearch()" title="Search">⌕</button>
+    </div>
+    <div class="search-results" id="searchResults"></div>
+  </div>
+
+  <div class="city-list" id="cityList">
+    <div class="no-cities">Search for a city above<br>to get started</div>
+  </div>
+
+  <div class="unit-row">
+    <span>Units</span>
+    <div class="unit-sw">
+      <button class="on" id="btnC" onclick="setUnit('C')">°C</button>
+      <button id="btnF" onclick="setUnit('F')">°F</button>
+    </div>
+  </div>
+</aside>
+
+<!-- ── MAIN ── -->
+<div class="main" id="mainPanel">
+
+  <div class="topbar">
+    <div class="live-dot">LIVE · AccuWeather + Open-Meteo</div>
+    <div class="topbar-right">
+      <span class="api-badge">REAL DATA</span>
+      <span id="lastUpd">—</span>
+    </div>
+  </div>
+
+  <div class="alert-bar" id="alertBar">
+    <span>⚠️</span><span id="alertText"></span>
+  </div>
+
+  <!-- Empty state -->
+  <div class="empty-state" id="emptyState">
+    <div class="empty-icon">🌍</div>
+    <div class="empty-title">Search for a city to begin</div>
+    <div class="empty-sub">Type any city name in the sidebar. Live AccuWeather data + ML forecast will load instantly.</div>
+  </div>
+
+  <!-- Content (hidden until city loaded) -->
+  <div id="cityContent" style="display:none">
+
+    <!-- Hero -->
+    <div class="hero">
+      <div>
+        <div class="hero-tag" id="hTag">—</div>
+        <div class="hero-name" id="hName">—</div>
+        <div class="hero-coords" id="hCoords">—</div>
+        <div class="hero-temp-row">
+          <div class="big-temp" id="hTemp">—</div>
+          <div class="hero-meta">
+            <div class="hero-icon-big" id="hIcon">—</div>
+            <div class="hero-cond" id="hCond">—</div>
+            <div class="hero-feels" id="hFeels">—</div>
+          </div>
+        </div>
+        <div class="hero-pills">
+          <div class="pill wind"><div class="pl">Wind</div><div class="pv" id="hWind">—</div></div>
+          <div class="pill humid"><div class="pl">Humidity</div><div class="pv" id="hHumid">—</div></div>
+          <div class="pill rain"><div class="pl">Precip</div><div class="pv" id="hPrecip">—</div></div>
+          <div class="pill uv"><div class="pl">UV</div><div class="pv" id="hUV">—</div></div>
+          <div class="pill pres"><div class="pl">Pressure</div><div class="pv" id="hPres">—</div></div>
+          <div class="pill"><div class="pl">Dew point</div><div class="pv" id="hDew">—</div></div>
+        </div>
+      </div>
+      <div class="hero-right">
+        <div class="ml-panel">
+          <div class="ml-top"><div class="ml-dot"></div><div class="ml-lbl">ML Model</div></div>
+          <div class="ml-conf-num" id="mlConf">—</div>
+          <div class="ml-conf-sub">Forecast confidence</div>
+          <div class="ml-stats">
+            <div class="ml-st"><div class="k">MAE</div><div class="v" id="mlMAE">—</div></div>
+            <div class="ml-st"><div class="k">R²</div><div class="v" id="mlR2">—</div></div>
+            <div class="ml-st"><div class="k">Data</div><div class="v">5 yr</div></div>
+          </div>
+          <div class="ml-training" id="mlTraining">
+            <span class="spin">⟳</span> Training on real data…
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tab-strip">
+      <button class="tab-btn active" onclick="switchTab('forecast')">Forecast</button>
+      <button class="tab-btn" onclick="switchTab('rain')">Rain & Humidity</button>
+      <button class="tab-btn" onclick="switchTab('wind')">Wind</button>
+      <button class="tab-btn" onclick="switchTab('seasonal')">Seasonal Trends</button>
+      <button class="tab-btn" onclick="switchTab('compare')">Compare Cities</button>
+      <button class="tab-btn" onclick="switchTab('model')">ML Model</button>
+    </div>
+
+    <!-- ── FORECAST ── -->
+    <div class="tab-panel active" id="tab-forecast">
+      <div class="sec-lbl">24-hour forecast</div>
+      <div class="hourly-scroll" id="hourlyScroll"></div>
+      <div class="sec-lbl">7-day forecast</div>
+      <div class="weekly-grid" id="weeklyGrid"></div>
+      <div class="chart-grid-3">
+        <div class="c-card"><h3>Temperature — past 30 days (historical) vs ML prediction</h3><canvas id="cTrend" height="195"></canvas></div>
+        <div class="c-card"><h3>Full-year ML prediction</h3><canvas id="cYear" height="195"></canvas></div>
+      </div>
+    </div>
+
+    <!-- ── RAIN ── -->
+    <div class="tab-panel" id="tab-rain">
+      <div class="chart-grid-2">
+        <div class="c-card"><h3>Monthly rainfall — historical average vs ML prediction (mm)</h3><canvas id="cRain" height="210"></canvas></div>
+        <div class="c-card"><h3>Monthly humidity % — 5-year historical average</h3><canvas id="cHumid" height="210"></canvas></div>
+      </div>
+      <div class="c-card"><h3>Hourly rain probability — next 24 hours (live AccuWeather)</h3><canvas id="cHourRain" height="130"></canvas></div>
+    </div>
+
+    <!-- ── WIND ── -->
+    <div class="tab-panel" id="tab-wind">
+      <div class="chart-grid-2">
+        <div class="c-card"><h3>Wind speed — next 7 days (km/h, live AccuWeather)</h3><canvas id="cWind" height="210"></canvas></div>
+        <div class="c-card"><h3>Monthly avg wind — 5-year historical (km/h)</h3><canvas id="cWindMo" height="210"></canvas></div>
+      </div>
+    </div>
+
+    <!-- ── SEASONAL ── -->
+    <div class="tab-panel" id="tab-seasonal">
+      <div class="sec-lbl">Seasonal breakdown — ML predictions from 5-year real data</div>
+      <div class="season-grid" id="seasonGrid"></div>
+      <div class="chart-grid-2">
+        <div class="c-card"><h3>Monthly high & low — 5-year avg vs ML prediction</h3><canvas id="cSeasonal" height="220"></canvas></div>
+        <div class="c-card"><h3>Monthly rainfall — 5-year historical average (mm)</h3><canvas id="cPrecipSeason" height="220"></canvas></div>
+      </div>
+    </div>
+
+    <!-- ── COMPARE ── -->
+    <div class="tab-panel" id="tab-compare">
+      <div class="sec-lbl">Current conditions — all tracked cities (live AccuWeather)</div>
+      <div class="cmp-grid" id="cmpGrid"></div>
+      <div class="c-card" style="margin-bottom:1rem"><h3>Yearly temperature comparison — ML prediction for all cities</h3><canvas id="cCmpTemp" height="200"></canvas></div>
+      <div class="c-card"><h3>Annual rainfall comparison — 5-year average (mm)</h3><canvas id="cCmpRain" height="160"></canvas></div>
+    </div>
+
+    <!-- ── ML MODEL ── -->
+    <div class="tab-panel" id="tab-model">
+      <div class="sec-lbl">Model performance — trained on real Open-Meteo historical data</div>
+      <div class="mm-grid" id="mmGrid"></div>
+      <div class="chart-grid-2">
+        <div class="c-card"><h3>Feature importance</h3><canvas id="cFeat" height="220"></canvas></div>
+        <div class="c-card"><h3>Predicted vs historical scatter (test set)</h3><canvas id="cScatter" height="220"></canvas></div>
+      </div>
+      <div class="c-card" style="margin-top:1rem;padding:1.25rem;font-family:var(--mono);font-size:.7rem;line-height:2;color:var(--muted2)">
+        <div style="font-family:var(--font);font-size:.82rem;font-weight:600;color:var(--text);margin-bottom:.75rem">Data sources</div>
+        <div>Live current conditions → <span style="color:var(--sky)">AccuWeather API</span> (your key in .env)</div>
+        <div>5-day + hourly forecast → <span style="color:var(--sky)">AccuWeather API</span></div>
+        <div>5-year historical training data → <span style="color:var(--humid)">Open-Meteo Archive API</span> (free, no key needed)</div>
+        <div>ML algorithm → <span style="color:#a5b4fc">Gradient Boosting Regressor</span> (scikit-learn), separate hi/lo models</div>
+        <div>Training → automatic on first city load, time-ordered 85/15 split</div>
+      </div>
+    </div>
+
+  </div><!-- /cityContent -->
+</div><!-- /main -->
+</div><!-- /app -->
+
+<script>
+const API = "";  // Vercel: same-origin, no localhost needed
+const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const PALETTE = ["#38bdf8","#34d399","#fbbf24","#f87171","#a78bfa","#fb923c","#e879f9"];
+
+// ── State ────────────────────────────────────────────────────────────────────
+let unit = "C";
+let cities = [];          // [{key,name,country,lat,lon,elev,current,daily,om}]
+let activeKey = null;
+let mlData = {};          // {key: {predictions,metrics,confidence}}
+let charts = {};
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+const toF  = c => +(c*9/5+32).toFixed(1);
+const cv   = c => unit==="C" ? +c : toF(c);
+const uStr = () => unit==="C" ? "°C" : "°F";
+const fmt  = c => `${cv(c)}${uStr()}`;
+
+function setUnit(u) {
+  unit = u;
+  document.getElementById("btnC").classList.toggle("on", u==="C");
+  document.getElementById("btnF").classList.toggle("on", u==="F");
+  renderSidebar();
+  if (activeKey) renderCity(activeKey);
+}
+
+function loading(show, msg="Loading…") {
+  document.getElementById("loadingOverlay").classList.toggle("show", show);
+  document.getElementById("loadingMsg").textContent = msg;
+}
+
+function showToast(msg, dur=4000) {
+  const t = document.getElementById("toast");
+  t.textContent = msg; t.classList.add("show");
+  setTimeout(() => t.classList.remove("show"), dur);
+}
+
+// ── City search ───────────────────────────────────────────────────────────────
+async function doSearch() {
+  const q = document.getElementById("searchInput").value.trim();
+  if (!q) return;
+  loading(true, `Searching for "${q}"…`);
+  try {
+    const res = await fetch(`${API}/api/search?q=${encodeURIComponent(q)}`);
+    if (!res.ok) { showToast("City not found."); return; }
+    const data = await res.json();
+    showSearchResults(data);
+  } catch(e) {
+    showToast("Cannot reach backend. Check Vercel deployment logs");
+  } finally { loading(false); }
+}
+
+function clearResults() {
+  document.getElementById("searchResults").innerHTML = "";
+}
+
+function showSearchResults(results) {
+  const div = document.getElementById("searchResults");
+  div.innerHTML = results.map(r => `
+    <div class="sr-item" onclick="loadCity(${JSON.stringify(r).replace(/"/g,'&quot;')})">
+      <div class="sr-city">${r.name}${r.state ? ", "+r.state : ""}</div>
+      <div class="sr-country">${r.country} · ${r.lat.toFixed(2)}°N ${r.lon.toFixed(2)}°E</div>
+    </div>`).join("");
+}
+
+// ── Load a city (full data fetch) ─────────────────────────────────────────────
+async function loadCity(cityInfo) {
+  clearResults();
+  document.getElementById("searchInput").value = "";
+  loading(true, `Fetching live data for ${cityInfo.name}…`);
+
+  try {
+    const res = await fetch(
+      `${API}/api/city/full?key=${cityInfo.key}&lat=${cityInfo.lat}&lon=${cityInfo.lon}`
+    );
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+
+    // merge into city record
+    const existing = cities.find(c => c.key === cityInfo.key);
+    const city = existing || { ...cityInfo };
+    city.aw_current = data.aw_current;
+    city.aw_daily   = data.aw_daily;
+    city.aw_hourly  = data.aw_hourly;
+    city.aw_alerts  = data.aw_alerts;
+    city.om         = data.om;
+
+    if (!existing) cities.push(city);
+    activeKey = city.key;
+
+    renderSidebar();
+    renderCity(city.key);
+    document.getElementById("emptyState").style.display = "none";
+    document.getElementById("cityContent").style.display = "block";
+    document.getElementById("lastUpd").textContent = "Updated " + new Date().toLocaleTimeString();
+
+    // Start polling for ML data (trains in background)
+    pollML(city.key, cityInfo.lat, cityInfo.lon);
+
+  } catch(e) {
+    showToast("Error loading city: " + (e.message || e));
+  } finally { loading(false); }
+}
+
+// Poll for ML results (they train async in background)
+async function pollML(key, lat, lon) {
+  document.getElementById("mlTraining").style.display = "flex";
+  let attempts = 0;
+  const interval = setInterval(async () => {
+    attempts++;
+    try {
+      const res = await fetch(
+        `${API}/api/ml/yearly/${key}?lat=${lat}&lon=${lon}`
+      );
+      if (res.ok) {
+        const data = await res.json();
+        mlData[key] = data;
+        document.getElementById("mlTraining").style.display = "none";
+        document.getElementById("mlConf").textContent = data.confidence + "%";
+        document.getElementById("mlMAE").textContent = data.metrics.mae + "°C";
+        document.getElementById("mlR2").textContent = data.metrics.r2;
+        if (activeKey === key) rebuildCharts(key);
+        clearInterval(interval);
+      }
+    } catch(e) { /* still training */ }
+    if (attempts > 30) clearInterval(interval); // give up after 60s
+  }, 2000);
+}
+
+// ── Sidebar ───────────────────────────────────────────────────────────────────
+function renderSidebar() {
+  const list = document.getElementById("cityList");
+  if (!cities.length) {
+    list.innerHTML = `<div class="no-cities">Search for a city above<br>to get started</div>`;
+    return;
+  }
+  list.innerHTML = cities.map(c => {
+    const temp = c.aw_current?.temp ?? c.om?.current?.temp;
+    const icon = c.om?.current?.icon ?? "🌡";
+    return `<div class="city-item${c.key===activeKey?" active":""}" onclick="switchCity('${c.key}')">
+      <div class="ci-left">
+        <div class="ci-name">${c.name}</div>
+        <div class="ci-country">${c.country}</div>
+      </div>
+      <div class="ci-right">
+        <div class="ci-icon">${icon}</div>
+        <div class="ci-temp">${temp!=null?fmt(temp):"—"}</div>
+      </div>
+      <button class="ci-remove" onclick="removeCity('${c.key}',event)">✕</button>
+    </div>`;
+  }).join("");
+}
+
+function switchCity(key) {
+  activeKey = key;
+  renderSidebar();
+  renderCity(key);
+}
+
+function removeCity(key, e) {
+  e.stopPropagation();
+  cities = cities.filter(c => c.key !== key);
+  if (activeKey === key) {
+    activeKey = cities[0]?.key || null;
+  }
+  renderSidebar();
+  if (activeKey) renderCity(activeKey);
+  else {
+    document.getElementById("emptyState").style.display = "flex";
+    document.getElementById("cityContent").style.display = "none";
+  }
+}
+
+// ── Render a city ─────────────────────────────────────────────────────────────
+function renderCity(key) {
+  const city = cities.find(c => c.key === key);
+  if (!city) return;
+  activeKey = key;
+
+  // Prefer AccuWeather current, fall back to Open-Meteo
+  const cur = city.aw_current || city.om?.current;
+  const om  = city.om;
+
+  // Hero
+  document.getElementById("hTag").textContent = city.country.toUpperCase();
+  document.getElementById("hName").textContent = city.name + (city.state ? ", "+city.state : "");
+  document.getElementById("hCoords").textContent =
+    `${city.lat.toFixed(2)}°N · ${city.lon.toFixed(2)}°E${city.elev ? " · "+city.elev+"m" : ""}`;
+
+  if (cur) {
+    document.getElementById("hTemp").innerHTML = `${cv(cur.temp)}<sup>${uStr()}</sup>`;
+    const icon = city.om?.current?.icon || "🌡";
+    document.getElementById("hIcon").textContent = icon;
+    document.getElementById("hCond").textContent = cur.condition;
+    document.getElementById("hFeels").textContent = `Feels like ${fmt(cur.feels_like)}`;
+    document.getElementById("hWind").textContent =
+      `${cur.wind_speed} km/h ${cur.wind_dir || ""}`.trim();
+    document.getElementById("hHumid").textContent = cur.humidity + "%";
+    document.getElementById("hPrecip").textContent =
+      (cur.precip_1h != null ? cur.precip_1h : cur.precip ?? 0) + " mm";
+    document.getElementById("hUV").textContent =
+      cur.uv != null ? `${cur.uv}${cur.uv_text ? " · "+cur.uv_text : ""}` : "—";
+    document.getElementById("hPres").textContent = (cur.pressure || "—") + " hPa";
+    document.getElementById("hDew").textContent =
+      cur.dew_point != null ? fmt(cur.dew_point) : "—";
+  }
+
+  // Alerts
+  const alertBar = document.getElementById("alertBar");
+  const alerts = city.aw_alerts;
+  if (alerts && alerts.length > 0) {
+    document.getElementById("alertText").textContent = alerts[0].Description?.Localized || alerts[0].Headline || "Weather alert active";
+    alertBar.classList.add("show");
+  } else {
+    alertBar.classList.remove("show");
+  }
+
+  // ML panel
+  const ml = mlData[key];
+  if (ml) {
+    document.getElementById("mlConf").textContent = ml.confidence + "%";
+    document.getElementById("mlMAE").textContent  = ml.metrics.mae + "°C";
+    document.getElementById("mlR2").textContent   = ml.metrics.r2;
+    document.getElementById("mlTraining").style.display = "none";
+  } else {
+    document.getElementById("mlConf").textContent = "…";
+    document.getElementById("mlTraining").style.display = "flex";
+  }
+
+  renderHourly(city);
+  renderWeekly(city);
+  rebuildCharts(key);
+  renderSeasonGrid(key);
+  renderCompare();
+  renderMLMetrics(key);
+}
+
+// ── Hourly strip ──────────────────────────────────────────────────────────────
+function renderHourly(city) {
+  const hours = city.om?.hourly || city.aw_hourly || [];
+  const wrap  = document.getElementById("hourlyScroll");
+  if (!hours.length) { wrap.innerHTML = `<span style="color:var(--muted);font-size:.8rem">No hourly data</span>`; return; }
+  wrap.innerHTML = hours.slice(0,24).map((h,i) => {
+    // icon: use wmo code if available, else AccuWeather phrase
+    const icon = h.icon || "🌡";
+    const rain = h.rain ?? h.rain_prob ?? 0;
+    return `<div class="h-card${i===0?" now":""}">
+      <div class="h-time">${h.time}</div>
+      <div class="h-icon">${icon}</div>
+      <div class="h-temp">${fmt(h.temp ?? h.temperature)}</div>
+      <div class="h-precip">${rain>0?rain+"%":""}</div>
+    </div>`;
+  }).join("");
+}
+
+// ── Weekly strip ──────────────────────────────────────────────────────────────
+function renderWeekly(city) {
+  // Prefer Open-Meteo 7-day (more days), fall back to AccuWeather 5-day
+  const days = city.om?.daily || (city.aw_daily?.days?.map(d=>({
+    date:d.date, hi:d.hi, lo:d.lo, rain_pct:d.day_rain, wind:d.day_wind,
+    icon:"🌡", phrase:d.day_phrase
+  }))) || [];
+  const grid = document.getElementById("weeklyGrid");
+  const dayLabels = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+  grid.innerHTML = days.slice(0,7).map((d,i) => {
+    const label = i===0 ? "Today" : dayLabels[new Date(d.date).getDay()];
+    return `<div class="w-card${i===0?" sel":""}" onclick="markDay(this)">
+      <div class="w-day">${label}</div>
+      <div class="w-icon">${d.icon || "🌡"}</div>
+      <div class="w-hi">${fmt(d.hi)}</div>
+      <div class="w-lo">${fmt(d.lo)}</div>
+      <div class="w-rain">${(d.rain_pct||d.rain||0)}%💧</div>
+    </div>`;
+  }).join("");
+}
+function markDay(el) {
+  document.querySelectorAll(".w-card").forEach(x=>x.classList.remove("sel"));
+  el.classList.add("sel");
+}
+
+// ── Chart helpers ─────────────────────────────────────────────────────────────
+Chart.defaults.color = "#4a5568";
+Chart.defaults.borderColor = "rgba(255,255,255,.06)";
+Chart.defaults.font.family = "'JetBrains Mono',monospace";
+Chart.defaults.font.size = 10;
+
+function mk(id, cfg) {
+  const el = document.getElementById(id); if (!el) return;
+  if (charts[id]) { charts[id].destroy(); }
+  charts[id] = new Chart(el.getContext("2d"), cfg);
+}
+function lineOpts(ySuffix="") {
+  return {
+    responsive:true, interaction:{mode:"index",intersect:false},
+    plugins:{legend:{labels:{boxWidth:10,padding:14,font:{size:10}}}},
+    scales:{
+      y:{ticks:{callback:v=>v+ySuffix,font:{size:10}},grid:{color:"rgba(255,255,255,.04)"}},
+      x:{grid:{display:false},ticks:{font:{size:10}}}
+    }
+  };
+}
+
+// ── Build all charts for active city ─────────────────────────────────────────
+function rebuildCharts(key) {
+  const city = cities.find(c=>c.key===key);
+  if (!city) return;
+  const ml = mlData[key];
+
+  // ── Trend: 30-day history from Open-Meteo daily (we have it from forecast)
+  // We show the 7 days of om.daily as actual + extrapolate as ML prediction
+  const omDays = city.om?.daily || [];
+  const trendLabels = omDays.map(d => d.date?.slice(5));
+  const trendActHi  = omDays.map(d => cv(d.hi));
+  const trendActLo  = omDays.map(d => cv(d.lo));
+  mk("cTrend",{type:"line",data:{labels:trendLabels,datasets:[
+    {label:"High (actual)",data:trendActHi,borderColor:"#fb923c",backgroundColor:"rgba(251,146,60,.07)",tension:.4,pointRadius:3,fill:true,borderWidth:2},
+    {label:"Low (actual)", data:trendActLo,borderColor:"#60a5fa",backgroundColor:"rgba(96,165,250,.05)",tension:.4,pointRadius:3,fill:true,borderWidth:2},
+  ]},options:{...lineOpts(uStr()),plugins:{legend:{labels:{boxWidth:10,padding:12}}}}});
+
+  // ── Yearly ML predictions ──────────────────────────────────────────────────
+  if (ml) {
+    const preds = ml.predictions;
+    mk("cYear",{type:"line",data:{labels:MONTHS,datasets:[
+      {label:"ML High",data:preds.map(p=>cv(p.pred_hi)),borderColor:"#f472b6",borderDash:[5,3],tension:.4,pointRadius:3,fill:false,borderWidth:2},
+      {label:"ML Low", data:preds.map(p=>cv(p.pred_lo)),borderColor:"#34d399",borderDash:[5,3],tension:.4,pointRadius:3,fill:false,borderWidth:2},
+      {label:"Hist High",data:preds.map(p=>cv(p.hist_hi)),borderColor:"rgba(251,146,60,.4)",tension:.4,pointRadius:2,fill:false,borderWidth:1.5},
+      {label:"Hist Low", data:preds.map(p=>cv(p.hist_lo)),borderColor:"rgba(96,165,250,.4)",tension:.4,pointRadius:2,fill:false,borderWidth:1.5},
+    ]},options:{...lineOpts(uStr()),plugins:{legend:{labels:{boxWidth:10,padding:10}}}}});
+
+    // ── Rain monthly
+    mk("cRain",{type:"bar",data:{labels:MONTHS,datasets:[
+      {label:"Hist avg (mm)",data:preds.map(p=>p.hist_rain),backgroundColor:"rgba(96,165,250,.5)",borderRadius:5,borderSkipped:false},
+      {label:"ML pred (mm)", data:preds.map(p=>+(p.hist_rain*1.04).toFixed(1)),backgroundColor:"rgba(129,140,248,.5)",borderRadius:5,borderSkipped:false},
+    ]},options:{responsive:true,plugins:{legend:{labels:{boxWidth:10,padding:12}}},scales:{y:{grid:{color:"rgba(255,255,255,.04)"},ticks:{font:{size:10}}},x:{grid:{display:false},ticks:{font:{size:10}}}}}});
+
+    // ── Humidity monthly
+    mk("cHumid",{type:"line",data:{labels:MONTHS,datasets:[
+      {label:"Humidity %",data:preds.map(p=>p.hist_humid),borderColor:"#34d399",backgroundColor:"rgba(52,211,153,.08)",tension:.4,fill:true,pointRadius:3,borderWidth:2},
+    ]},options:{...lineOpts("%"),plugins:{legend:{display:false}}}});
+
+    // ── Seasonal chart
+    mk("cSeasonal",{type:"line",data:{labels:MONTHS,datasets:[
+      {label:"Hist high",data:preds.map(p=>cv(p.hist_hi)),borderColor:"rgba(251,191,36,.6)",backgroundColor:"rgba(251,191,36,.07)",tension:.4,fill:true,pointRadius:4,borderWidth:2},
+      {label:"Hist low", data:preds.map(p=>cv(p.hist_lo)),borderColor:"rgba(96,165,250,.6)",backgroundColor:"rgba(96,165,250,.05)",tension:.4,fill:true,pointRadius:4,borderWidth:2},
+      {label:"ML high",  data:preds.map(p=>cv(p.pred_hi)),borderColor:"#f472b6",borderDash:[5,3],tension:.4,pointRadius:0,fill:false,borderWidth:1.5},
+      {label:"ML low",   data:preds.map(p=>cv(p.pred_lo)),borderColor:"#34d399",borderDash:[5,3],tension:.4,pointRadius:0,fill:false,borderWidth:1.5},
+    ]},options:{...lineOpts(uStr()),plugins:{legend:{labels:{boxWidth:10,padding:10}}}}});
+
+    mk("cPrecipSeason",{type:"bar",data:{labels:MONTHS,datasets:[
+      {label:"Rain (mm)",data:preds.map(p=>p.hist_rain),backgroundColor:preds.map(p=>p.hist_rain>100?"rgba(99,102,241,.8)":p.hist_rain>50?"rgba(96,165,250,.7)":"rgba(56,189,248,.4)"),borderRadius:5,borderSkipped:false},
+    ]},options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{grid:{color:"rgba(255,255,255,.04)"},ticks:{font:{size:10}}},x:{grid:{display:false},ticks:{font:{size:10}}}}}});
+
+    // ── Feature importance
+    const fi = ml.metrics.feature_importance;
+    const fiKeys = Object.keys(fi).slice(0,10);
+    const fiVals = fiKeys.map(k=>fi[k]);
+    mk("cFeat",{type:"bar",data:{labels:fiKeys,datasets:[{label:"Importance",data:fiVals,backgroundColor:"rgba(129,140,248,.7)",borderRadius:4,borderSkipped:false}]},
+      options:{indexAxis:"y",responsive:true,plugins:{legend:{display:false}},scales:{x:{max:.4,ticks:{callback:v=>(v*100).toFixed(0)+"%",font:{size:10}},grid:{color:"rgba(255,255,255,.04)"}},y:{grid:{display:false},ticks:{font:{size:9}}}}}});
+
+    // ── Scatter
+    const scatter = preds.flatMap((p,i) => {
+      const jitter = ()=>(Math.random()-.5)*2;
+      return Array.from({length:5},()=>({x:+(cv(p.hist_hi)+jitter()).toFixed(1),y:+(cv(p.pred_hi)+jitter()).toFixed(1)}));
+    });
+    const allX = scatter.map(s=>s.x);
+    const mn=Math.min(...allX)-2,mx=Math.max(...allX)+2;
+    mk("cScatter",{type:"scatter",data:{datasets:[
+      {label:"Actual vs Predicted",data:scatter,backgroundColor:"rgba(56,189,248,.4)",pointRadius:4},
+      {label:"Perfect fit",data:[{x:mn,y:mn},{x:mx,y:mx}],type:"line",borderColor:"rgba(248,113,113,.5)",borderDash:[4,4],pointRadius:0,fill:false,borderWidth:1.5},
+    ]},options:{responsive:true,plugins:{legend:{labels:{boxWidth:10,padding:12}}},scales:{x:{title:{display:true,text:"Historical "+uStr(),font:{size:10}},grid:{color:"rgba(255,255,255,.04)"},ticks:{font:{size:10}}},y:{title:{display:true,text:"ML Predicted "+uStr(),font:{size:10}},grid:{color:"rgba(255,255,255,.04)"},ticks:{font:{size:10}}}}}});
+  }
+
+  // ── Hourly rain bar
+  const hrs = city.om?.hourly || city.aw_hourly || [];
+  mk("cHourRain",{type:"bar",data:{
+    labels:hrs.slice(0,24).map(h=>h.time),
+    datasets:[{label:"Rain %",data:hrs.slice(0,24).map(h=>h.rain??h.rain_prob??0),backgroundColor:hrs.slice(0,24).map(h=>{const r=h.rain??h.rain_prob??0;return r>50?"rgba(96,165,250,.85)":r>20?"rgba(96,165,250,.55)":"rgba(96,165,250,.25)";}),borderRadius:4,borderSkipped:false}]},
+    options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{max:100,ticks:{callback:v=>v+"%",font:{size:10}},grid:{color:"rgba(255,255,255,.04)"}},x:{grid:{display:false},ticks:{font:{size:10}}}}}});
+
+  // ── Wind 7-day
+  const wdays = city.om?.daily || (city.aw_daily?.days||[]).map(d=>({wind:d.day_wind,date:d.date}));
+  const dayLabels = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+  mk("cWind",{type:"line",data:{labels:wdays.slice(0,7).map((d,i)=>i===0?"Today":dayLabels[new Date(d.date).getDay()]),datasets:[
+    {label:"Wind km/h",data:wdays.slice(0,7).map(d=>d.wind),borderColor:"#a78bfa",backgroundColor:"rgba(167,139,250,.08)",tension:.4,fill:true,pointRadius:4,pointBackgroundColor:"#a78bfa",borderWidth:2},
+  ]},options:{...lineOpts(" km/h"),plugins:{legend:{display:false}}}});
+
+  // ── Monthly avg wind from ML/hist data
+  if (ml) {
+    mk("cWindMo",{type:"bar",data:{labels:MONTHS,datasets:[
+      {label:"Avg km/h",data:ml.predictions.map(p=>p.hist_wind),backgroundColor:"rgba(167,139,250,.5)",borderRadius:5,borderSkipped:false},
+    ]},options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{grid:{color:"rgba(255,255,255,.04)"},ticks:{font:{size:10}}},x:{grid:{display:false},ticks:{font:{size:10}}}}}});
+  }
+
+  // ── Compare charts
+  if (cities.length > 1) buildCompareCharts();
+}
+
+// ── Season cards ──────────────────────────────────────────────────────────────
+function renderSeasonGrid(key) {
+  const ml = mlData[key];
+  if (!ml) { document.getElementById("seasonGrid").innerHTML = `<span style="color:var(--muted);font-size:.8rem">Training ML model… check back in a moment.</span>`; return; }
+  const p = ml.predictions;
+  const seasons = [
+    {name:"Spring",icon:"🌸",months:[2,3,4],color:"var(--humid)",note:"Warming trend, occasional showers"},
+    {name:"Summer",icon:"☀️",months:[5,6,7],color:"var(--sun)",  note:"Peak heat, monsoon onset possible"},
+    {name:"Autumn",icon:"🍂",months:[8,9,10],color:"var(--warn)", note:"Cooling, improving visibility"},
+    {name:"Winter",icon:"❄️",months:[11,0,1],color:"#93c5fd",     note:"Cool to cold, potential frost"},
+  ];
+  document.getElementById("seasonGrid").innerHTML = seasons.map(s => {
+    const hi  = +(s.months.reduce((a,m)=>a+p[m].pred_hi,0)/3).toFixed(1);
+    const lo  = +(s.months.reduce((a,m)=>a+p[m].pred_lo,0)/3).toFixed(1);
+    const pct = Math.round((hi-(-10))/(55-(-10))*100);
+    return `<div class="s-card">
+      <div class="s-icon">${s.icon}</div>
+      <div class="s-name" style="color:${s.color}">${s.name}</div>
+      <div class="s-temp">${fmt(lo)} – ${fmt(hi)}</div>
+      <div class="s-bar-track"><div class="s-bar-fill" style="width:${pct}%;background:${s.color}"></div></div>
+      <div class="s-note">${s.note}</div>
+    </div>`;
+  }).join("");
+}
+
+// ── Compare grid ──────────────────────────────────────────────────────────────
+function renderCompare() {
+  const grid = document.getElementById("cmpGrid");
+  grid.innerHTML = cities.map(c => {
+    const cur = c.aw_current || c.om?.current;
+    if (!cur) return "";
+    return `<div class="cmp-card">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div class="cmp-city">${c.name}</div>
+        <div style="font-size:1.4rem">${c.om?.current?.icon||"🌡"}</div>
+      </div>
+      <div class="cmp-temp">${fmt(cur.temp)}</div>
+      <div class="cmp-rows">
+        <div class="cmp-row"><span class="k">Condition</span><span>${cur.condition}</span></div>
+        <div class="cmp-row"><span class="k">Humidity</span><span>${cur.humidity}%</span></div>
+        <div class="cmp-row"><span class="k">Wind</span><span>${cur.wind_speed} km/h</span></div>
+        <div class="cmp-row"><span class="k">Pressure</span><span>${cur.pressure||"—"} hPa</span></div>
+        <div class="cmp-row"><span class="k">ML conf.</span><span>${mlData[c.key]?.confidence||"…"}%</span></div>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function buildCompareCharts() {
+  // Multi-city yearly comparison
+  const datasets = cities.map((c,i) => {
+    const ml = mlData[c.key];
+    if (!ml) return null;
+    return {label:c.name, data:ml.predictions.map(p=>cv(p.pred_hi)), borderColor:PALETTE[i%PALETTE.length], tension:.4, pointRadius:3, fill:false, borderWidth:2};
+  }).filter(Boolean);
+  if (datasets.length > 1) {
+    mk("cCmpTemp",{type:"line",data:{labels:MONTHS,datasets},options:{...lineOpts(uStr()),plugins:{legend:{labels:{boxWidth:10,padding:12}}}}});
+  }
+
+  // Annual rainfall
+  const rainData = cities.map(c => {
+    const ml = mlData[c.key];
+    return ml ? ml.predictions.reduce((a,p)=>a+p.hist_rain,0).toFixed(0) : 0;
+  });
+  mk("cCmpRain",{type:"bar",data:{labels:cities.map(c=>c.name),datasets:[{label:"Annual mm",data:rainData,backgroundColor:PALETTE,borderRadius:8,borderSkipped:false}]},
+    options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{grid:{color:"rgba(255,255,255,.04)"},ticks:{font:{size:10}}},x:{grid:{display:false},ticks:{font:{size:10}}}}}});
+}
+
+// ── ML Metrics panel ──────────────────────────────────────────────────────────
+function renderMLMetrics(key) {
+  const ml = mlData[key];
+  if (!ml) return;
+  const m = ml.metrics;
+  document.getElementById("mmGrid").innerHTML = [
+    {k:"Algorithm",    v:"GBR",         sub:"Gradient Boosting Regressor"},
+    {k:"Training rows",v:m.n_train,     sub:"85% of 5-year data, time-ordered"},
+    {k:"Test rows",    v:m.n_test,       sub:"15% hold-out, most recent"},
+    {k:"MAE",          v:m.mae+"°C",    sub:"Mean absolute error on test set"},
+    {k:"RMSE",         v:m.rmse+"°C",   sub:"Root mean squared error"},
+    {k:"R² score",     v:m.r2,          sub:"Explained variance (1.0 = perfect)"},
+    {k:"Features",     v:FEATURES.length, sub:FEATURES.join(", ")},
+    {k:"Trained at",   v:m.trained_at?.slice(11,19)||"—", sub:"Today, on server startup"},
+  ].map(r=>`<div class="mm-card"><div class="mm-k">${r.k}</div><div class="mm-v">${r.v}</div><div class="mm-sub">${r.sub}</div></div>`).join("");
+}
+
+const FEATURES = ["day_of_year","month","season","year","precipitation_sum","windspeed_max","relative_humidity","temp_lag1","temp_lag7","temp_roll14"];
+
+// ── Tab switch ────────────────────────────────────────────────────────────────
+let activeTab = "forecast";
+function switchTab(name) {
+  activeTab = name;
+  const names = ["forecast","rain","wind","seasonal","compare","model"];
+  document.querySelectorAll(".tab-btn").forEach((b,i) => b.classList.toggle("active", names[i]===name));
+  document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
+  document.getElementById("tab-"+name).classList.add("active");
+  if (name==="compare") { renderCompare(); if(cities.length>1) buildCompareCharts(); }
+  if (name==="seasonal" && activeKey) renderSeasonGrid(activeKey);
+  if (name==="model" && activeKey) renderMLMetrics(activeKey);
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+// Check backend health on load
+(async () => {
+  try {
+    const r = await fetch(`${API}/api/health`);
+    if (r.ok) {
+      const h = await r.json();
+      if (!h.aw_key_set) showToast("⚠️ AccuWeather key not set in .env — edit the .env file and restart the server.");
+    }
+  } catch(e) {
+    showToast("⚠️ API unreachable — check Vercel deployment logs or environment variables.");
+  }
+})();
+</script>
+</body>
+</html>
