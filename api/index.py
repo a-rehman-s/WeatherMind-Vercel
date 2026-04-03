@@ -2,28 +2,23 @@
 WeatherMind — Vercel Serverless Backend
   Live data   : AccuWeather API  (current, 5-day forecast, hourly, alerts)
   Historical  : Open-Meteo Archive API (5 years daily — free, no key)
-  ML model    : Trained fresh per-request using real historical data
-                (Vercel is stateless — no in-memory persistence between calls)
-  Frontend    : /public/index.html served by Vercel CDN
+  ML model    : Trained fresh per /api/ml/yearly call (Vercel is stateless)
+  Frontend    : api/index.html served at GET /
 """
 
 import os, asyncio
 from datetime import datetime, timedelta
 
 import httpx
-import numpy as np
-import pandas as pd
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from sklearn.ensemble import GradientBoostingRegressor
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
+from fastapi.responses import FileResponse, HTMLResponse
 
 load_dotenv()
 
 AW_KEY  = os.getenv("ACCUWEATHER_API_KEY", "")
+_HERE   = os.path.dirname(os.path.abspath(__file__))
 AW_BASE = "https://dataservice.accuweather.com"
 OM_FORECAST = "https://api.open-meteo.com/v1/forecast"
 OM_ARCHIVE  = "https://archive-api.open-meteo.com/v1/archive"
@@ -76,7 +71,12 @@ async def _aw(path: str, params: dict = {}) -> dict | list:
     return await _get(f"{AW_BASE}{path}", {**params, "apikey": AW_KEY})
 
 # ── Health check ──────────────────────────────────────────────────────────────
-@app.get("/api/health")
+@app.get("/")
+async def serve_ui():
+    html_path = os.path.join(_HERE, "index.html")
+    if os.path.exists(html_path):
+        return FileResponse(html_path, media_type="text/html")
+    return {"status": "ok", "message": "WeatherMind API — index.html not found next to index.py"}
 async def health():
     return {
         "status":     "ok",
@@ -274,24 +274,34 @@ async def om_forecast(lat: float, lon: float):
         "hourly":  hourly_out,
     }
 
-# ── Open-Meteo: fetch 5-year historical data ──────────────────────────────────
-async def _fetch_history(lat: float, lon: float) -> pd.DataFrame:
+# ── ML: yearly prediction endpoint ───────────────────────────────────────────
+@app.get("/api/ml/yearly")
+async def ml_yearly(lat: float, lon: float):
+    """
+    Fetches 5 years of real Open-Meteo data, trains GBR model, returns
+    monthly predictions + metrics. All heavy deps imported lazily here.
+    """
+    import numpy as np
+    import pandas as pd
+    from sklearn.ensemble import GradientBoostingRegressor
+    from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+    from sklearn.model_selection import train_test_split
+    from sklearn.preprocessing import StandardScaler
+
+    # ── fetch 5-year history from Open-Meteo (no key needed) ──────────────────
     end   = (datetime.utcnow() - timedelta(days=2)).strftime("%Y-%m-%d")
     start = (datetime.utcnow() - timedelta(days=365 * 5)).strftime("%Y-%m-%d")
-    params = {
-        "latitude":   lat,
-        "longitude":  lon,
-        "start_date": start,
-        "end_date":   end,
+    raw = await _get(OM_ARCHIVE, {
+        "latitude": lat, "longitude": lon,
+        "start_date": start, "end_date": end,
         "daily": (
             "temperature_2m_max,temperature_2m_min,precipitation_sum,"
             "wind_speed_10m_max,relative_humidity_2m_mean"
         ),
         "timezone": "UTC",
-    }
-    data = await _get(OM_ARCHIVE, params)
-    dd   = data["daily"]
-    df   = pd.DataFrame({
+    })
+    dd = raw["daily"]
+    df = pd.DataFrame({
         "date":      pd.to_datetime(dd["time"]),
         "high_temp": dd["temperature_2m_max"],
         "low_temp":  dd["temperature_2m_min"],
@@ -299,94 +309,68 @@ async def _fetch_history(lat: float, lon: float) -> pd.DataFrame:
         "wind_max":  dd["wind_speed_10m_max"],
         "humidity":  dd["relative_humidity_2m_mean"],
     }).dropna()
+    df["day_of_year"]       = df["date"].dt.dayofyear
+    df["month"]             = df["date"].dt.month
+    df["year"]              = df["date"].dt.year
+    df["season"]            = ((df["month"] % 12) // 3).astype(int)
+    df["precipitation_sum"] = df["precip"]
+    df["windspeed_max"]     = df["wind_max"]
+    df["relative_humidity"] = df["humidity"]
+    df["temp_lag1"]         = df["high_temp"].shift(1)
+    df["temp_lag7"]         = df["high_temp"].shift(7)
+    df["temp_roll14"]       = df["high_temp"].rolling(14).mean()
+    df = df.dropna().reset_index(drop=True)
 
-    df["day_of_year"]        = df["date"].dt.dayofyear
-    df["month"]              = df["date"].dt.month
-    df["year"]               = df["date"].dt.year
-    df["season"]             = ((df["month"] % 12) // 3).astype(int)
-    df["precipitation_sum"]  = df["precip"]
-    df["windspeed_max"]      = df["wind_max"]
-    df["relative_humidity"]  = df["humidity"]
-    df["temp_lag1"]          = df["high_temp"].shift(1)
-    df["temp_lag7"]          = df["high_temp"].shift(7)
-    df["temp_roll14"]        = df["high_temp"].rolling(14).mean()
-    return df.dropna().reset_index(drop=True)
+    # ── train ──────────────────────────────────────────────────────────────────
+    def _train(df):
+        X  = df[FEATURES].values
+        sc = StandardScaler()
+        Xs = sc.fit_transform(X)
+        yh, yl = df["high_temp"].values, df["low_temp"].values
+        Xtr,Xte,yh_tr,yh_te,yl_tr,_ = train_test_split(
+            Xs, yh, yl, test_size=0.15, shuffle=False
+        )
+        p = dict(n_estimators=200, learning_rate=0.06, max_depth=5,
+                 subsample=0.8, min_samples_leaf=5, random_state=42)
+        mhi = GradientBoostingRegressor(**p).fit(Xtr, yh_tr)
+        mlo = GradientBoostingRegressor(**p).fit(Xtr, yl_tr)
+        yh_pred = mhi.predict(Xte)
+        fi = dict(zip(FEATURES, mhi.feature_importances_.tolist()))
+        return dict(
+            model_hi=mhi, model_lo=mlo, scaler=sc,
+            metrics=dict(
+                mae    = round(float(mean_absolute_error(yh_te, yh_pred)), 2),
+                rmse   = round(float(np.sqrt(mean_squared_error(yh_te, yh_pred))), 2),
+                r2     = round(float(r2_score(yh_te, yh_pred)), 3),
+                n_train= len(Xtr), n_test=len(Xte),
+                feature_importance={k:round(v,4) for k,v in
+                                    sorted(fi.items(), key=lambda x:-x[1])},
+            ),
+        )
 
-# ── ML training (called per-request on Vercel — stateless) ───────────────────
-def _train(df: pd.DataFrame) -> dict:
-    X  = df[FEATURES].values
-    sc = StandardScaler()
-    Xs = sc.fit_transform(X)
-    yh = df["high_temp"].values
-    yl = df["low_temp"].values
-
-    Xtr, Xte, yh_tr, yh_te, yl_tr, yl_te = train_test_split(
-        Xs, yh, yl, test_size=0.15, shuffle=False
-    )
-    params = dict(n_estimators=200, learning_rate=0.06, max_depth=5,
-                  subsample=0.8, min_samples_leaf=5, random_state=42)
-
-    mhi = GradientBoostingRegressor(**params).fit(Xtr, yh_tr)
-    mlo = GradientBoostingRegressor(**params).fit(Xtr, yl_tr)
-
-    yh_pred = mhi.predict(Xte)
-    fi      = dict(zip(FEATURES, mhi.feature_importances_.tolist()))
-
-    return dict(
-        model_hi=mhi, model_lo=mlo, scaler=sc, df=df,
-        metrics=dict(
-            mae   = round(float(mean_absolute_error(yh_te, yh_pred)), 2),
-            rmse  = round(float(np.sqrt(mean_squared_error(yh_te, yh_pred))), 2),
-            r2    = round(float(r2_score(yh_te, yh_pred)), 3),
-            n_train = len(Xtr),
-            n_test  = len(Xte),
-            feature_importance = {
-                k: round(v, 4)
-                for k, v in sorted(fi.items(), key=lambda x: -x[1])
-            },
-        ),
-    )
-
-# ── ML: yearly prediction endpoint ───────────────────────────────────────────
-@app.get("/api/ml/yearly")
-async def ml_yearly(lat: float, lon: float):
-    """
-    Fetches 5 years of real Open-Meteo data, trains the model, returns
-    monthly predictions + metrics. Takes ~15-25s on first call per city.
-    """
     loop = asyncio.get_event_loop()
-    df   = await _fetch_history(lat, lon)
     cm   = await loop.run_in_executor(None, _train, df)
 
     MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun",
                    "Jul","Aug","Sep","Oct","Nov","Dec"]
-    year   = datetime.utcnow().year
-    preds  = []
-
+    preds = []
     for mi in range(12):
         mid_doy = int(mi * 30.44 + 15)
-        mdf = df[df["month"] == mi + 1]
-
+        mdf  = df[df["month"] == mi + 1]
         h_hi = round(float(mdf["high_temp"].mean()), 1) if len(mdf) else 0.0
-        h_lo = round(float(mdf["low_temp"].mean()), 1)  if len(mdf) else 0.0
-        h_pr = round(float(mdf["precip"].mean()), 1)    if len(mdf) else 0.0
-        h_ws = round(float(mdf["wind_max"].mean()), 1)  if len(mdf) else 0.0
-        h_hu = round(float(mdf["humidity"].mean()), 1)  if len(mdf) else 0.0
-        lag  = h_hi
-
-        X  = np.array([[mid_doy, mi+1, (mi % 12) // 3, year,
-                         h_pr, h_ws, h_hu, lag, lag, lag]])
+        h_lo = round(float(mdf["low_temp"].mean()),  1) if len(mdf) else 0.0
+        h_pr = round(float(mdf["precip"].mean()),    1) if len(mdf) else 0.0
+        h_ws = round(float(mdf["wind_max"].mean()),  1) if len(mdf) else 0.0
+        h_hu = round(float(mdf["humidity"].mean()),  1) if len(mdf) else 0.0
+        X  = np.array([[mid_doy, mi+1, (mi%12)//3, datetime.utcnow().year,
+                         h_pr, h_ws, h_hu, h_hi, h_hi, h_hi]])
         Xs = cm["scaler"].transform(X)
-
         preds.append({
             "month":      MONTH_NAMES[mi],
             "pred_hi":    round(float(cm["model_hi"].predict(Xs)[0]), 1),
             "pred_lo":    round(float(cm["model_lo"].predict(Xs)[0]), 1),
-            "hist_hi":    h_hi,
-            "hist_lo":    h_lo,
-            "hist_rain":  h_pr,
-            "hist_wind":  h_ws,
-            "hist_humid": h_hu,
+            "hist_hi":    h_hi, "hist_lo":    h_lo,
+            "hist_rain":  h_pr, "hist_wind":  h_ws, "hist_humid": h_hu,
         })
 
     return {
