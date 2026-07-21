@@ -17,11 +17,15 @@ from fastapi.responses import FileResponse, HTMLResponse
 
 load_dotenv()
 
-AW_KEY  = os.getenv("ACCUWEATHER_API_KEY", "")
-_HERE   = os.path.dirname(os.path.abspath(__file__))
-AW_BASE = "https://dataservice.accuweather.com"
+import os
+
+OW_KEY = os.getenv("API_KEY", "")  # Uses the OpenWeather API key from Vercel
+_HERE = os.path.dirname(os.path.abspath(__file__))
+
+OW_BASE = "https://api.openweathermap.org/data/2.5"
+
 OM_FORECAST = "https://api.open-meteo.com/v1/forecast"
-OM_ARCHIVE  = "https://archive-api.open-meteo.com/v1/archive"
+OM_ARCHIVE = "https://archive-api.open-meteo.com/v1/archive"
 
 app = FastAPI(title="WeatherMind API")
 app.add_middleware(
